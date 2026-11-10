@@ -149,7 +149,11 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
     </dl>
     <p class="hint">Referencia: 85 dB durante 8 horas; cada 3 dB más, el tiempo se reduce a la mitad.</p>
     <div class="field">
-      <label for="limit">Límite de este espacio (dB)</label>
+      <label for="quiet">Silencioso hasta (dB)</label>
+      <input id="quiet" type="number" min="30" max="99" step="1">
+    </div>
+    <div class="field">
+      <label for="limit">Aceptable hasta; por encima, no recomendado (dB)</label>
       <input id="limit" type="number" min="30" max="100" step="1">
     </div>
     <div class="field">
@@ -160,17 +164,18 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
     <p class="hint" id="calmsg">Sin calibrar, el nivel en dB es solo una referencia.</p>
   </details>
 
-  <p class="note">Medición aproximada: el micrófono de un celular no es un sonómetro calibrado. La frecuencia es más precisa que los decibeles. Velocidad del sonido: 343 m/s.</p>
+  <p class="note">Medición aproximada: el micrófono de un celular no es un sonómetro calibrado. La frecuencia es más precisa que los decibeles. Velocidad del sonido: 343 m/s. Clasificación: silencioso hasta 40 dB, aceptable hasta 55 dB y no recomendado por encima (criterio del proyecto, ajustable; la OMS recomienda 35 dB para aulas).</p>
 </main>
 
 <script>
 (function(){
   var $=function(id){return document.getElementById(id)};
   var MIN=30, MAX=100, V=343, ARC=471.2;
-  var offset=90, limit=55;
+  var offset=90, limit=55, quiet=40;
   try{
     var o=parseFloat(localStorage.getItem('ruido_offset')); if(isFinite(o)) offset=o;
     var l=parseFloat(localStorage.getItem('ruido_limit')); if(isFinite(l)) limit=l;
+    var q=parseFloat(localStorage.getItem('ruido_quiet')); if(isFinite(q)) quiet=q;
   }catch(e){}
   var ctx=null, analyser=null, stream=null, raf=0, running=false;
   var td, fd, sm=null, lastDbfs=null, sumP=0, n=0, maxDb=null;
@@ -180,8 +185,8 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
     if(Array.isArray(zs)) zones=zs.filter(function(x){return x&&isFinite(x.leq)&&isFinite(x.max)}).slice(0,ZMAX);
   }catch(e){}
 
-  $('limit').value=limit;
-  function save(){ try{ localStorage.setItem('ruido_offset',offset); localStorage.setItem('ruido_limit',limit); }catch(e){} }
+  $('limit').value=limit; $('quiet').value=quiet;
+  function save(){ try{ localStorage.setItem('ruido_offset',offset); localStorage.setItem('ruido_limit',limit); localStorage.setItem('ruido_quiet',quiet); }catch(e){} }
   function pct(v){ return Math.max(0,Math.min(1,(v-MIN)/(MAX-MIN))); }
 
   function fmtSafe(db){
@@ -194,10 +199,10 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
   }
 
   function setState(db){
-    var st=db<limit?'ok':(db<limit+10?'warn':'bad');
+    var st=stOf(db);
     $('hero').setAttribute('data-state',st);
-    $('status').textContent = st==='ok' ? 'Ambiente ideal para estudiar' :
-      st==='warn' ? 'Ruido elevado: afecta la concentración' : 'Demasiado ruido para estudiar';
+    $('status').textContent = st==='ok' ? 'Espacio silencioso: ideal para estudiar' :
+      st==='warn' ? 'Espacio aceptable para estudiar' : 'No recomendado: demasiado ruido para estudiar';
   }
 
   function loop(){
@@ -273,7 +278,12 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
 
   $('limit').addEventListener('change',function(){
     var v=parseFloat(this.value);
-    if(isFinite(v)){ limit=Math.max(30,Math.min(100,v)); this.value=limit; save(); renderZ(); }
+    if(isFinite(v)){ limit=Math.max(quiet+1,Math.min(100,v)); this.value=limit; save(); renderZ(); }
+  });
+
+  $('quiet').addEventListener('change',function(){
+    var v=parseFloat(this.value);
+    if(isFinite(v)){ quiet=Math.max(30,Math.min(limit-1,v)); this.value=quiet; save(); renderZ(); }
   });
 
   $('cal').addEventListener('click',function(){
@@ -285,7 +295,7 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
   });
 
   var LBL={ok:'Silencioso',warn:'Aceptable',bad:'No recomendado'};
-  function stOf(db){ return db<limit?'ok':(db<limit+10?'warn':'bad'); }
+  function stOf(db){ return db<quiet?'ok':(db<limit?'warn':'bad'); }
   function median(a){
     if(!a.length) return null;
     var b=a.slice().sort(function(x,y){return x-y}), m=b.length>>1;
@@ -325,7 +335,7 @@ input[type=number]{font:inherit;width:5.5rem;padding:8px 10px;border-radius:10px
       t='Mide al menos otra zona para poder comparar. '+b.name+' resultó '+LBL[stOf(b.leq)].toLowerCase()+' ('+Math.round(b.leq)+' dB).';
     }else{
       var w=s[s.length-1], diff=Math.round(w.leq-b.leq), bst=stOf(b.leq);
-      if(bst==='bad') t='Ninguna zona es recomendable para estudiar (todas superan '+(limit+10)+' dB). La menos ruidosa es '+b.name+' con '+Math.round(b.leq)+' dB.';
+      if(bst==='bad') t='Ninguna zona es recomendable para estudiar (todas superan '+limit+' dB). La menos ruidosa es '+b.name+' con '+Math.round(b.leq)+' dB.';
       else t=b.name+' es la más conveniente para concentrarte: '+LBL[bst].toLowerCase()+', con '+Math.round(b.leq)+' dB de promedio, '+diff+' dB menos que '+w.name+'.';
       if(b.freq && b.leq>=limit-5) t+=' Su ruido se concentra cerca de '+Math.round(b.freq)+' Hz.';
     }
